@@ -14,13 +14,6 @@ class Provider extends AbstractProvider
     public const IDENTIFIER = 'AZURE';
 
     /**
-     * The base Azure Graph URL.
-     *
-     * @var string
-     */
-    protected $graphUrl = 'https://graph.microsoft.com/v1.0/me';
-
-    /**
      * The scopes being requested.
      *
      * @var array
@@ -28,21 +21,11 @@ class Provider extends AbstractProvider
     protected $scopes = ['User.Read'];
 
     /**
-     * The Graph API version for the request.
-     *
-     * @var string
-     */
-    protected $version = '1.5';
-
-    /**
      * {@inheritdoc}
      */
     protected function getAuthUrl($state)
     {
-        return $this->buildAuthUrlFromBase(
-            'https://login.microsoftonline.com/'.($this->config['tenant'] ?? 'common').'/oauth2/v2.0/authorize',
-            $state
-        );
+        return $this->buildAuthUrlFromBase($this->getBaseUrl().'/oauth2/v2.0/authorize', $state);
     }
 
     /**
@@ -50,9 +33,15 @@ class Provider extends AbstractProvider
      */
     protected function getTokenUrl()
     {
-        return 'https://login.microsoftonline.com/'.($this->config['tenant'] ?? 'common').'/oauth2/v2.0/token';
+        return $this->getBaseUrl().'/oauth2/v2.0/token';
     }
 
+    /**
+     * Get the access token.
+     *
+     * @param  string  $code
+     * @return string
+     */
     public function getAccessToken($code)
     {
         $response = $this->getHttpClient()->post($this->getTokenUrl(), [
@@ -69,7 +58,7 @@ class Provider extends AbstractProvider
      */
     protected function getUserByToken($token)
     {
-        $response = $this->getHttpClient()->get($this->graphUrl, [
+        $response = $this->getHttpClient()->get('https://graph.microsoft.com/v1.0/me', [
             RequestOptions::HEADERS => [
                 'Accept'        => 'application/json',
                 'Authorization' => 'Bearer '.$token,
@@ -85,7 +74,7 @@ class Provider extends AbstractProvider
     protected function mapUserToObject(array $user)
     {
         return (new User())->setRaw($user)->map([
-            'id'    => $user['id'],  // $user['objectId'],
+            'id'    => $user['id'],
             'nickname' => null,
             'name' => $user['displayName'],
             'email' => $user['userPrincipalName'],
@@ -129,14 +118,20 @@ class Provider extends AbstractProvider
      */
     public function getAccessTokenResponse($code)
     {
-
         $response = $this->getHttpClient()->post($this->getTokenUrl(), [
-            'headers' => ['Accept' => 'application/json'],
-            'form_params' => $this->getTokenFields($code),
-            'proxy' => config('services.azure.proxy')
+            RequestOptions::HEADERS => ['Accept' => 'application/json'],
+            RequestOptions::FORM_PARAMS => $this->getTokenFields($code),
+            RequestOptions::PROXY => $this->getConfig('proxy'),
         ]);
 
-        return json_decode($response->getBody(), true);
+        return json_decode((string) $response->getBody(), true);
     }
 
+    /**
+     * @return string
+     */
+    protected function getBaseUrl(): string
+    {
+        return 'https://login.microsoftonline.com/'.($this->config['tenant'] ?? 'common');
+    }
 }
