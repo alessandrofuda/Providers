@@ -107,7 +107,10 @@ class Provider extends AbstractProvider
      */
     public static function additionalConfigKeys()
     {
-        return ['tenant', 'logout_url'];
+        return [
+            'logout_url',
+            'tenant',
+        ];
     }
 
     /**
@@ -132,6 +135,6 @@ class Provider extends AbstractProvider
      */
     protected function getBaseUrl(): string
     {
-        return 'https://login.microsoftonline.com/'.($this->config['tenant'] ?? 'common');
+        return 'https://login.microsoftonline.com/'.$this->getConfig('tenant', 'common');
     }
 }
