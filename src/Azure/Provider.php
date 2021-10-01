@@ -14,28 +14,18 @@ class Provider extends AbstractProvider
     public const IDENTIFIER = 'AZURE';
 
     /**
-     * The base Azure Graph URL.
+     * The scopes being requested.
      *
-     * @var string
+     * @var array
      */
-    protected $graphUrl = 'https://graph.windows.net/myorganization/me';
-
-    /**
-     * The Graph API version for the request.
-     *
-     * @var string
-     */
-    protected $version = '1.5';
+    protected $scopes = ['User.Read'];
 
     /**
      * {@inheritdoc}
      */
     protected function getAuthUrl($state)
     {
-        return $this->buildAuthUrlFromBase(
-            'https://login.microsoftonline.com/'.($this->config['tenant'] ?? 'common').'/oauth2/authorize',
-            $state
-        );
+        return $this->buildAuthUrlFromBase($this->getBaseUrl().'/oauth2/v2.0/authorize', $state);
     }
 
     /**
@@ -43,9 +33,15 @@ class Provider extends AbstractProvider
      */
     protected function getTokenUrl()
     {
-        return 'https://login.microsoftonline.com/common/oauth2/token';
+        return $this->getBaseUrl().'/oauth2/v2.0/token';
     }
 
+    /**
+     * Get the access token.
+     *
+     * @param  string  $code
+     * @return string
+     */
     public function getAccessToken($code)
     {
         $response = $this->getHttpClient()->post($this->getTokenUrl(), [
@@ -62,10 +58,7 @@ class Provider extends AbstractProvider
      */
     protected function getUserByToken($token)
     {
-        $response = $this->getHttpClient()->get($this->graphUrl, [
-            RequestOptions::QUERY => [
-                'api-version' => $this->version,
-            ],
+        $response = $this->getHttpClient()->get('https://graph.microsoft.com/v1.0/me', [
             RequestOptions::HEADERS => [
                 'Accept'        => 'application/json',
                 'Authorization' => 'Bearer '.$token,
@@ -81,8 +74,11 @@ class Provider extends AbstractProvider
     protected function mapUserToObject(array $user)
     {
         return (new User())->setRaw($user)->map([
-            'id'    => $user['objectId'], 'nickname' => null, 'name' => $user['displayName'],
-            'email' => $user['userPrincipalName'], 'avatar' => null,
+            'id'    => $user['id'],
+            'nickname' => null,
+            'name' => $user['displayName'],
+            'email' => $user['userPrincipalName'],
+            'avatar' => null,
         ]);
     }
 
@@ -91,10 +87,19 @@ class Provider extends AbstractProvider
      */
     protected function getTokenFields($code)
     {
-        return array_merge(parent::getTokenFields($code), [
+        $fields = [
             'grant_type' => 'authorization_code',
-            'resource'   => 'https://graph.windows.net',
-        ]);
+            'client_id' => $this->clientId,
+            'client_secret' => $this->clientSecret,
+            'code' => $code,
+            'redirect_uri' => $this->redirectUrl,
+        ];
+
+        if ($this->usesPKCE()) {
+            $fields['code_verifier'] = $this->request->session()->pull('code_verifier');
+        }
+
+        return $fields;
     }
 
     /**
@@ -102,6 +107,34 @@ class Provider extends AbstractProvider
      */
     public static function additionalConfigKeys()
     {
-        return ['tenant'];
+        return [
+            'logout_url',
+            'tenant',
+        ];
+    }
+
+    /**
+     * Get the access token response for the given code.
+     *
+     * @param  string  $code
+     * @return array
+     */
+    public function getAccessTokenResponse($code)
+    {
+        $response = $this->getHttpClient()->post($this->getTokenUrl(), [
+            RequestOptions::HEADERS => ['Accept' => 'application/json'],
+            RequestOptions::FORM_PARAMS => $this->getTokenFields($code),
+            RequestOptions::PROXY => $this->getConfig('proxy'),
+        ]);
+
+        return json_decode((string) $response->getBody(), true);
+    }
+
+    /**
+     * @return string
+     */
+    protected function getBaseUrl(): string
+    {
+        return 'https://login.microsoftonline.com/'.$this->getConfig('tenant', 'common');
     }
 }
